@@ -1,7 +1,21 @@
 import os
+import sys
+import subprocess
+
+# Auto-install setuptools at runtime if missing (fixes pkg_resources error)
+try:
+    import pkg_resources
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "setuptools"])
+    import pkg_resources
+
 import streamlit as st
 from pypdf import PdfReader
 from crewai import Agent, Task, Crew, LLM
+
+# Disable CrewAI telemetry to avoid unnecessary background calls
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 
 # --- 1. Page Configuration ---
 st.set_page_config(
