@@ -134,7 +134,7 @@ api_key = groq_api_key or openai_api_key
 # Default model configuration
 configured_model = st.secrets.get(
     "MODEL",
-    "groq/llama-3.3-70b-versatile" if groq_api_key else "gpt-4o-mini",
+    "openai/gpt-oss-120b" if groq_api_key else "gpt-4o-mini",
 )
 
 if not api_key:
