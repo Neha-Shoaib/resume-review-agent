@@ -1,23 +1,26 @@
 import os
 import sys
-import subprocess
+from unittest.mock import MagicMock
 
-# Auto-install setuptools at runtime if missing (fixes pkg_resources error)
+# --- 1. Mock pkg_resources in memory to satisfy CrewAI Telemetry ---
 try:
     import pkg_resources
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "setuptools"])
-    import pkg_resources
+    mock_pkg = MagicMock()
+    mock_pkg.get_distribution.return_value.version = "0.80.0"
+    mock_pkg.DistributionNotFound = Exception
+    sys.modules["pkg_resources"] = mock_pkg
 
+# Disable CrewAI telemetry to avoid unnecessary background requests
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
+
+# --- 2. Core Imports ---
 import streamlit as st
 from pypdf import PdfReader
 from crewai import Agent, Task, Crew, LLM
 
-# Disable CrewAI telemetry to avoid unnecessary background calls
-os.environ["OTEL_SDK_DISABLED"] = "true"
-os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
-
-# --- 1. Page Configuration ---
+# --- 3. Page Configuration ---
 st.set_page_config(
     page_title="AI Resume Review Agent",
     page_icon="📄",
@@ -26,13 +29,13 @@ st.set_page_config(
 )
 
 
-# --- 2. Helper Functions ---
+# --- 4. Helper Functions ---
 def extract_text_from_pdf(uploaded_file) -> str:
     """Extracts raw text from an uploaded PDF file in-memory using pypdf."""
     try:
         reader = PdfReader(uploaded_file)
         extracted_text = ""
-        for page_num, page in enumerate(reader.pages):
+        for page in reader.pages:
             page_text = page.extract_text()
             if page_text:
                 extracted_text += page_text + "\n"
@@ -52,20 +55,17 @@ def extract_text_from_pdf(uploaded_file) -> str:
 
 def initialize_crewai_agent(api_key: str, model_name: str) -> Crew:
     """Initializes the single-agent, single-task CrewAI pipeline."""
-    # Ensure LiteLLM recognizes Groq/OpenAI keys
     if "groq" in model_name.lower():
         os.environ["GROQ_API_KEY"] = api_key
     else:
         os.environ["OPENAI_API_KEY"] = api_key
 
-    # Initialize LLM instance through CrewAI
     llm = LLM(
         model=model_name,
         api_key=api_key,
-        temperature=0.1,  # Low temperature to prioritize factual accuracy
+        temperature=0.1,
     )
 
-    # Define the Single Agent
     resume_auditor = Agent(
         role="Objective Technical Resume Auditor",
         goal="Accurately and critically evaluate candidate resumes against target job descriptions without making assumptions.",
@@ -83,7 +83,6 @@ def initialize_crewai_agent(api_key: str, model_name: str) -> Crew:
         llm=llm,
     )
 
-    # Define the Single Task
     review_task = Task(
         description=(
             "Carefully review the provided Candidate Resume against the Target Job Description.\n\n"
@@ -127,7 +126,7 @@ def initialize_crewai_agent(api_key: str, model_name: str) -> Crew:
     )
 
 
-# --- 3. UI Header & Privacy Notice ---
+# --- 5. UI Header & Privacy Notice ---
 st.title("📄 Single-Agent Resume Reviewer")
 st.markdown(
     "Evaluate candidate resumes against real job requirements with zero hallucinations. "
@@ -140,12 +139,11 @@ st.info(
     "solely to generate this analysis."
 )
 
-# --- 4. Configuration Check ---
+# --- 6. Configuration Check ---
 groq_api_key = st.secrets.get("GROQ_API_KEY")
 openai_api_key = st.secrets.get("OPENAI_API_KEY")
 api_key = groq_api_key or openai_api_key
 
-# Default model configuration
 configured_model = st.secrets.get(
     "MODEL",
     "openai/gpt-oss-120b" if groq_api_key else "gpt-4o-mini",
@@ -154,10 +152,10 @@ configured_model = st.secrets.get(
 if not api_key:
     st.error(
         "⚠️ **API Key Missing!** Please configure `GROQ_API_KEY` (or `OPENAI_API_KEY`) "
-        "and `MODEL` in your `.streamlit/secrets.toml` or Streamlit Cloud Settings."
+        "and `MODEL` in your Streamlit Cloud Settings > Secrets."
     )
 
-# --- 5. Application Inputs ---
+# --- 7. Application Inputs ---
 col1, col2 = st.columns(2, gap="medium")
 
 with col1:
@@ -196,11 +194,10 @@ with col2:
         placeholder="Paste complete job post, including responsibilities, prerequisites, and nice-to-haves...",
     )
 
-# --- 6. Review Action & Processing ---
+# --- 8. Review Action & Processing ---
 st.divider()
 
 if st.button("🚀 Analyze Resume", type="primary", use_container_width=True):
-    # Validation checks
     if not api_key:
         st.error("Cannot proceed: Missing API key. Check your Streamlit secrets.")
     elif not resume_text.strip():
@@ -221,7 +218,6 @@ if st.button("🚀 Analyze Resume", type="primary", use_container_width=True):
                 st.success("Analysis Complete!")
                 st.markdown(str(result))
 
-                # Download button for candidate convenience
                 st.download_button(
                     label="📥 Download Review Report (.md)",
                     data=str(result),
@@ -239,7 +235,7 @@ if st.button("🚀 Analyze Resume", type="primary", use_container_width=True):
                 elif "authentication" in error_msg or "401" in error_msg or "invalid api key" in error_msg:
                     st.error(
                         "⚠️ **Authentication Failed:** Invalid API Key. Please verify your credentials "
-                        "in `.streamlit/secrets.toml`."
+                        "in your Streamlit App Secrets."
                     )
                 elif "timeout" in error_msg:
                     st.error(
